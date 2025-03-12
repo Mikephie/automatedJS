@@ -1,0 +1,45 @@
+name: Convert Scripts
+
+on:
+  push:
+    paths:
+      - 'QuantumultX/**'
+    branches:
+      - main
+  workflow_dispatch:  # 允许手动触发工作流
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # 获取完整历史记录
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+
+      - name: Install dependencies
+        run: |
+          npm install -g typescript ts-node
+          npm install --save @types/node fs-extra axios
+          npm install --save-dev @types/fs-extra
+
+      - name: Create output directories
+        run: |
+          mkdir -p Loon/plugins
+          mkdir -p Surge/modules
+          
+      - name: Run conversion script
+        run: ts-node scripts/convert.ts
+        
+      - name: Commit and push changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add Loon/ Surge/
+          git commit -m "Auto convert scripts: $(date +'%Y-%m-%d %H:%M:%S')" || echo "No changes to commit"
+          git push
