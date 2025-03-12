@@ -12,6 +12,7 @@ type ScriptType = {
   desc?: string;
   author?: string;
   scriptPath?: string;
+  originalName?: string; // 添加原始文件名字段
   iconUrl?: string;
   patterns?: string[];
   hostnames?: string[];
@@ -41,11 +42,12 @@ async function parseScriptInfo(filePath: string): Promise<ScriptType> {
   try {
     const content = await fs.readFile(filePath, 'utf8');
     const fileName = path.basename(filePath);
-    const name = fileName.replace(/\.(js|conf)$/, '');
+    // 保留原始文件名（不含扩展名）
+    const originalName = fileName.replace(/\.(js|conf)$/, '');
     
     // 从脚本内容中提取App名称
     const appNameMatch = content.match(/const\s+appName\s*=\s*["']([^"']+)["']/);
-    const appName = appNameMatch ? appNameMatch[1].replace(/✨/g, '').trim() : name;
+    const appName = appNameMatch ? appNameMatch[1].replace(/✨/g, '').trim() : originalName;
     
     // 提取作者
     const authorMatch = content.match(/const\s+author\s*=\s*["']([^"']+)["']/);
@@ -53,13 +55,34 @@ async function parseScriptInfo(filePath: string): Promise<ScriptType> {
     
     // 提取URL模式
     const patterns: string[] = [];
-    const patternMatches = content.match(/pattern=([^,\n]+)/g) || 
-                         content.match(/url\s+([^\s]+)/g) ||
-                         content.match(/http-response\s+([^\s]+)/g);
     
-    if (patternMatches) {
-      patternMatches.forEach(match => {
-        const pattern = match.replace(/pattern=|url\s+|http-response\s+/g, '').trim();
+    // 找出Surge格式的pattern
+    const surgePatternMatches = content.match(/pattern=([^,\s]+)/g);
+    if (surgePatternMatches) {
+      surgePatternMatches.forEach(match => {
+        const pattern = match.replace(/pattern=/, '').trim();
+        if (pattern && !patterns.includes(pattern)) {
+          patterns.push(pattern);
+        }
+      });
+    }
+    
+    // 找出Loon格式的pattern
+    const loonPatternMatches = content.match(/http-response\s+([^\s]+)/g);
+    if (loonPatternMatches) {
+      loonPatternMatches.forEach(match => {
+        const pattern = match.replace(/http-response\s+/, '').trim();
+        if (pattern && !patterns.includes(pattern)) {
+          patterns.push(pattern);
+        }
+      });
+    }
+    
+    // 找出QuantumultX格式的pattern
+    const qxPatternMatches = content.match(/url\s+([^\s]+)/g);
+    if (qxPatternMatches) {
+      qxPatternMatches.forEach(match => {
+        const pattern = match.replace(/url\s+/, '').trim();
         if (pattern && !patterns.includes(pattern)) {
           patterns.push(pattern);
         }
@@ -68,33 +91,27 @@ async function parseScriptInfo(filePath: string): Promise<ScriptType> {
     
     // 提取MITM主机名
     const hostnames: string[] = [];
-    const hostnameMatch = content.match(/hostname\s*=\s*([^,\n]+)/);
-    if (hostnameMatch) {
-      const hostname = hostnameMatch[1].trim();
-      if (hostname && !hostnames.includes(hostname)) {
-        hostnames.push(hostname);
-      }
+    const hostnameMatches = content.match(/hostname\s*=\s*([^,\n]+)/g);
+    if (hostnameMatches) {
+      hostnameMatches.forEach(match => {
+        const hostnameStr = match.replace(/hostname\s*=\s*(%APPEND%\s*)?/, '').trim();
+        const hosts = hostnameStr.split(',').map(h => h.trim());
+        hosts.forEach(host => {
+          if (host && !hostnames.includes(host)) {
+            hostnames.push(host);
+          }
+        });
+      });
     }
-    
-    // 从内容中直接提取Surge和Loon配置
-    const surgeScriptSection = content.match(/\[Script\]\s*\/\/\s*Surge\s*\n([\s\S]*?)(?=\[|$)/);
-    const loonScriptSection = content.match(/\[Script\]\s*\/\/\s*Loon\s*\n([\s\S]*?)(?=\[|$)/);
     
     // 提取脚本路径
     let scriptPath = '';
-    if (surgeScriptSection) {
-      const scriptPathMatch = surgeScriptSection[1].match(/script-path=([^,\n]+)/);
-      if (scriptPathMatch) {
-        scriptPath = scriptPathMatch[1].trim();
-      }
-    } else if (loonScriptSection) {
-      const scriptPathMatch = loonScriptSection[1].match(/script-path=([^,\n]+)/);
-      if (scriptPathMatch) {
-        scriptPath = scriptPathMatch[1].trim();
-      }
+    const scriptPathMatches = content.match(/script-path=([^,\s]+)/g);
+    if (scriptPathMatches && scriptPathMatches.length > 0) {
+      scriptPath = scriptPathMatches[0].replace(/script-path=/, '').trim();
     } else {
       // 从 QuantumultX 规则中提取
-      const qxScriptMatch = content.match(/script-response-body\s+([^\s]+)/);
+      const qxScriptMatch = content.match(/script-response-body\s+([^\s\n]+)/);
       if (qxScriptMatch) {
         scriptPath = qxScriptMatch[1].trim();
       }
@@ -105,7 +122,8 @@ async function parseScriptInfo(filePath: string): Promise<ScriptType> {
       desc: `${appName} 解锁`,
       author,
       scriptPath,
-      iconUrl: `https://raw.githubusercontent.com/Mikephie/icons/main/icon/${appName.toLowerCase()}.png`,
+      originalName, // 保存原始文件名
+      iconUrl: `https://raw.githubusercontent.com/Mikephie/icons/main/icon/${appName.toLowerCase().replace(/\s+/g, '')}.png`,
       patterns,
       hostnames,
       category: '🔐APP',
@@ -189,11 +207,11 @@ function extractPreconfiguredPlugins(script: ScriptType): { loon: string | null,
   const content = script.content;
   
   // 尝试提取预配置的Loon插件
-  const loonMatch = content.match(/Loon\n([\s\S]*?)(?=\n\n\n|$)/);
+  const loonMatch = content.match(/Loon\n([\s\S]*?)(?=\n\n\n|Surge\n|$)/);
   const loonPlugin = loonMatch ? loonMatch[1].trim() : null;
   
   // 尝试提取预配置的Surge模块
-  const surgeMatch = content.match(/Surge\n([\s\S]*?)(?=\n\n\n|$)/);
+  const surgeMatch = content.match(/Surge\n([\s\S]*?)(?=\n\n\n|Loon\n|$)/);
   const surgeModule = surgeMatch ? surgeMatch[1].trim() : null;
   
   return { loon: loonPlugin, surge: surgeModule };
@@ -252,6 +270,9 @@ async function main() {
       const script = await parseScriptInfo(filePath);
       console.log(`Converting ${script.name}...`);
       
+      // 使用原始文件名作为输出文件名（如果存在）
+      const outputBaseName = script.originalName || script.name.toLowerCase().replace(/\s+/g, '_');
+      
       // 尝试提取预配置插件
       const preconfigured = extractPreconfiguredPlugins(script);
       
@@ -267,7 +288,7 @@ async function main() {
       
       const loonChanged = await saveConvertedFile(
         LOON_OUTPUT_DIR, 
-        script.name.toLowerCase().replace(/\s+/g, '_'), 
+        outputBaseName, 
         loonContent, 
         '.plugin'
       );
@@ -284,7 +305,7 @@ async function main() {
       
       const surgeChanged = await saveConvertedFile(
         SURGE_OUTPUT_DIR, 
-        script.name.toLowerCase().replace(/\s+/g, '_'), 
+        outputBaseName, 
         surgeContent, 
         '.sgmodule'
       );
