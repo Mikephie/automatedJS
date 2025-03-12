@@ -56,5 +56,15 @@ jobs:
           # Pull with merge (instead of rebase) to handle conflicts safely
           git pull origin main --no-rebase || echo "Pull failed, proceeding with local changes"
           # Push the result
-          git push origin main
+          git push origin main || echo "Git push failed"
+        shell: bash
+
+      - name: Debug Git Push
+        if: failure()
+        run: |
+          echo "Debugging Git Push failure"
+          git status
+          git remote -v
+          git config -l
+          git show-ref
         shell: bash
