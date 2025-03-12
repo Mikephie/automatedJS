@@ -42,4 +42,9 @@ jobs:
           git config --local user.name "GitHub Action"
           git add Loon/ Surge/
           git commit -m "Auto convert scripts: $(date +'%Y-%m-%d %H:%M:%S')" || echo "No changes to commit"
+          
+          # 先拉取远程更改，解决可能的冲突
+          git pull --rebase origin main
+          
+          # 推送更改
           git push
