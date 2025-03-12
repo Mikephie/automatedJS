@@ -14,13 +14,13 @@ jobs:
     permissions:
       contents: write
     concurrency:
-      group: ${{ github.workflow }}-${{ github.ref }}  # Limits to one run per branch/workflow
-      cancel-in-progress: true  # Cancels older runs if a new one starts
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0  # Full history for reliable pulls
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v3
@@ -41,6 +41,7 @@ jobs:
           mkdir -p Surge/modules
 
       - name: Run conversion script
+        id: convert
         run: |
           ts-node scripts/convert.ts
 
@@ -49,12 +50,25 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
 
-      - name: Commit and push changes
+      - name: Check for changes
+        id: check_changes
         run: |
           git add Loon/ Surge/
-          git commit -m "Auto convert scripts: $(date +'%Y-%m-%d %H:%M:%S')" || echo "No changes to commit"
+          # 检查是否有实际变化
+          if git diff --staged --quiet; then
+            echo "No changes detected"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "Changes detected"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit and push changes
+        if: steps.check_changes.outputs.has_changes == 'true'
+        run: |
+          git commit -m "Auto convert scripts: $(date +'%Y-%m-%d %H:%M:%S')"
           git fetch origin
-          git pull origin main --no-rebase  # Merge strategy to handle remote changes
+          git pull origin main --no-rebase
           git push origin main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
