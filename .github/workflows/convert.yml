@@ -15,7 +15,9 @@ jobs:
       contents: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3  # Updated to v3
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Fetch full history to avoid shallow clone issues
 
       - name: Set up Node.js
         uses: actions/setup-node@v3
@@ -48,5 +50,11 @@ jobs:
         run: |
           git add Loon/ Surge/
           git commit -m "Auto convert scripts: $(date +'%Y-%m-%d %H:%M:%S')" || echo "No changes to commit"
-          git pull --rebase origin main  # Fetch and rebase on remote main
-          git push
+          # Debug: Show current branch and remote state
+          git fetch origin
+          git log --oneline --graph --all -n 5
+          # Pull with merge (instead of rebase) to handle conflicts safely
+          git pull origin main --no-rebase || echo "Pull failed, proceeding with local changes"
+          # Push the result
+          git push origin main
+        shell: bash
