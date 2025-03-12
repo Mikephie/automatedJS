@@ -1,6 +1,3 @@
-#!name = 边框水印大师 🔐APP
-#!author = 🅜ⓘ🅚ⓔ🅟ⓗ🅘ⓔ
-#!category=🔐APP
 photoby_vip = type=http-response, pattern=^https:\/\/photoby\.hasmash\.com, requires-body=true, max-size=0, script-path=https://raw.githubusercontent.com/Mikephie/Script/main/qx/bksyds.js, timeout=60
 
 [Script] //
