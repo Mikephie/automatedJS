@@ -11,8 +11,12 @@ type ScriptType = {
   name: string;
   desc?: string;
   author?: string;
+  scriptPath?: string;
+  iconUrl?: string;
+  patterns?: string[];
+  hostnames?: string[];
+  category?: string;
   content: string;
-  scriptUrl?: string;
 };
 
 /**
@@ -39,21 +43,73 @@ async function parseScriptInfo(filePath: string): Promise<ScriptType> {
     const fileName = path.basename(filePath);
     const name = fileName.replace(/\.(js|conf)$/, '');
     
-    // 提取脚本元数据
-    const nameMatch = content.match(/@name\s+(.+)/);
-    const descMatch = content.match(/@desc(?:ription)?\s+(.+)/);
-    const authorMatch = content.match(/@author\s+(.+)/);
+    // 从脚本内容中提取App名称
+    const appNameMatch = content.match(/const\s+appName\s*=\s*["']([^"']+)["']/);
+    const appName = appNameMatch ? appNameMatch[1].replace(/✨/g, '').trim() : name;
     
-    // 尝试从重写规则中提取脚本URL
-    const scriptUrlMatch = content.match(/script-(?:response|request)-body\s+([^\s]+)/i) || 
-                         content.match(/script-path\s*=\s*["']?([^"'\s]+)["']?/i);
+    // 提取作者
+    const authorMatch = content.match(/const\s+author\s*=\s*["']([^"']+)["']/);
+    const author = authorMatch ? authorMatch[1] : '🅜ⓘ🅚ⓔ🅟ⓗ🅘ⓔ';
     
-    return { 
-      name: nameMatch ? nameMatch[1].trim() : name,
-      desc: descMatch ? descMatch[1].trim() : `Converted from ${fileName}`,
-      author: authorMatch ? authorMatch[1].trim() : undefined,
-      content,
-      scriptUrl: scriptUrlMatch ? scriptUrlMatch[1].trim() : undefined
+    // 提取URL模式
+    const patterns: string[] = [];
+    const patternMatches = content.match(/pattern=([^,\n]+)/g) || 
+                         content.match(/url\s+([^\s]+)/g) ||
+                         content.match(/http-response\s+([^\s]+)/g);
+    
+    if (patternMatches) {
+      patternMatches.forEach(match => {
+        const pattern = match.replace(/pattern=|url\s+|http-response\s+/g, '').trim();
+        if (pattern && !patterns.includes(pattern)) {
+          patterns.push(pattern);
+        }
+      });
+    }
+    
+    // 提取MITM主机名
+    const hostnames: string[] = [];
+    const hostnameMatch = content.match(/hostname\s*=\s*([^,\n]+)/);
+    if (hostnameMatch) {
+      const hostname = hostnameMatch[1].trim();
+      if (hostname && !hostnames.includes(hostname)) {
+        hostnames.push(hostname);
+      }
+    }
+    
+    // 从内容中直接提取Surge和Loon配置
+    const surgeScriptSection = content.match(/\[Script\]\s*\/\/\s*Surge\s*\n([\s\S]*?)(?=\[|$)/);
+    const loonScriptSection = content.match(/\[Script\]\s*\/\/\s*Loon\s*\n([\s\S]*?)(?=\[|$)/);
+    
+    // 提取脚本路径
+    let scriptPath = '';
+    if (surgeScriptSection) {
+      const scriptPathMatch = surgeScriptSection[1].match(/script-path=([^,\n]+)/);
+      if (scriptPathMatch) {
+        scriptPath = scriptPathMatch[1].trim();
+      }
+    } else if (loonScriptSection) {
+      const scriptPathMatch = loonScriptSection[1].match(/script-path=([^,\n]+)/);
+      if (scriptPathMatch) {
+        scriptPath = scriptPathMatch[1].trim();
+      }
+    } else {
+      // 从 QuantumultX 规则中提取
+      const qxScriptMatch = content.match(/script-response-body\s+([^\s]+)/);
+      if (qxScriptMatch) {
+        scriptPath = qxScriptMatch[1].trim();
+      }
+    }
+    
+    return {
+      name: appName,
+      desc: `${appName} 解锁`,
+      author,
+      scriptPath,
+      iconUrl: `https://raw.githubusercontent.com/Mikephie/icons/main/icon/${appName.toLowerCase()}.png`,
+      patterns,
+      hostnames,
+      category: '🔐APP',
+      content
     };
   } catch (err) {
     console.error(`Error parsing script ${filePath}:`, err);
@@ -62,79 +118,31 @@ async function parseScriptInfo(filePath: string): Promise<ScriptType> {
 }
 
 /**
- * 提取QuantumultX重写规则
- */
-function extractRewriteRules(content: string): string[] {
-  const rewriteSection = content.match(/\[rewrite_local\]([\s\S]*?)(?:\[|$)/);
-  if (!rewriteSection) return [];
-  
-  return rewriteSection[1].split('\n')
-    .map(line => line.trim())
-    .filter(line => line && !line.startsWith('#'));
-}
-
-/**
- * 提取MITM主机名
- */
-function extractMitm(content: string): string[] {
-  const mitmSection = content.match(/\[mitm\]([\s\S]*?)(?:\[|$)/);
-  if (!mitmSection) return [];
-  
-  const hostnameMatch = mitmSection[1].match(/hostname\s*=\s*([^,\n]+)/);
-  if (!hostnameMatch) return [];
-  
-  return hostnameMatch[1].split(',').map(host => host.trim());
-}
-
-/**
  * 将QuantumultX脚本转换为Loon插件
  */
 function convertToLoonPlugin(script: ScriptType): string {
-  const { name, desc, author, content, scriptUrl } = script;
+  const { name, desc, author, scriptPath, iconUrl, patterns, hostnames } = script;
   
-  let loonPlugin = `#!name=${name}\n#!desc=${desc}\n`;
-  if (author) {
-    loonPlugin += `#!author=${author}\n`;
+  let loonPlugin = `#!name = ${name} ${script.category}\n`;
+  loonPlugin += `#!desc = ${desc || name + ' 解锁'}\n`;
+  loonPlugin += `#!author = ${author}\n`;
+  
+  if (iconUrl) {
+    loonPlugin += `#!icon = ${iconUrl}\n`;
   }
-  loonPlugin += '\n';
   
-  // 提取重写规则并转换为Loon格式
-  const rewriteRules = extractRewriteRules(content);
-  const hasScriptRules = rewriteRules.length > 0;
+  loonPlugin += `#appCategory = select,"✅签到","🚫广告","🔐APP","🛠️工具"\n\n`;
   
-  if (hasScriptRules || scriptUrl) {
-    loonPlugin += '[Script]\n';
-    
-    // 转换重写规则
-    rewriteRules.forEach(rule => {
-      // 解析QuantumultX重写规则
-      const urlMatch = rule.match(/^(.+?)\s+url\s+script-([^-]+)-([^-]+)\s+(.+)$/);
-      if (urlMatch) {
-        const [, pattern, type, bodyType, script] = urlMatch;
-        const requiresBody = bodyType === 'body';
-        
-        // 转换为Loon脚本格式
-        if (type === 'response') {
-          loonPlugin += `http-response ${pattern} script-path=${script}, requires-body=${requiresBody}, tag=${name}\n`;
-        } else if (type === 'request') {
-          loonPlugin += `http-request ${pattern} script-path=${script}, requires-body=${requiresBody}, tag=${name}\n`;
-        }
-      }
+  if (patterns && patterns.length > 0 && scriptPath) {
+    loonPlugin += `[Script]\n`;
+    patterns.forEach((pattern, index) => {
+      loonPlugin += `http-response ${pattern} script-path=${scriptPath}, requires-body=true, timeout=60, tag=${name.toLowerCase()}${index > 0 ? index : ''}\n`;
     });
-    
-    // 提取定时任务
-    const cronMatch = content.match(/cronexp\s*=\s*["']([^"']+)["']/);
-    if (cronMatch && scriptUrl) {
-      loonPlugin += `cron "${cronMatch[1]}" script-path=${scriptUrl}, tag=${name}\n`;
-    }
-    
-    loonPlugin += '\n';
+    loonPlugin += `\n`;
   }
   
-  // 提取并转换MITM主机名
-  const hostnames = extractMitm(content);
-  if (hostnames.length > 0) {
-    loonPlugin += '[MITM]\n';
+  if (hostnames && hostnames.length > 0) {
+    loonPlugin += `[MITM]\n`;
     loonPlugin += `hostname = ${hostnames.join(', ')}\n`;
   }
   
@@ -145,47 +153,29 @@ function convertToLoonPlugin(script: ScriptType): string {
  * 将QuantumultX脚本转换为Surge模块
  */
 function convertToSurgeModule(script: ScriptType): string {
-  const { name, desc, author, content, scriptUrl } = script;
+  const { name, desc, author, scriptPath, iconUrl, patterns, hostnames, category } = script;
   
-  let surgeModule = `#!name=${name}\n#!desc=${desc}\n`;
-  if (author) {
-    surgeModule += `#!author=${author}\n`;
+  let surgeModule = `#!name = ${name} ${category}\n`;
+  surgeModule += `#!desc = ${desc || name + ' - 模块'}\n`;
+  surgeModule += `#!author = ${author}\n`;
+  surgeModule += `#!category=${category}\n`;
+  
+  if (iconUrl) {
+    surgeModule += `#!icon = ${iconUrl}\n`;
   }
-  surgeModule += '\n';
   
-  // 提取重写规则并转换为Surge格式
-  const rewriteRules = extractRewriteRules(content);
-  const hasScriptRules = rewriteRules.length > 0;
+  surgeModule += `\n`;
   
-  if (hasScriptRules || scriptUrl) {
-    surgeModule += '[Script]\n';
-    
-    // 转换重写规则
-    rewriteRules.forEach(rule => {
-      // 解析QuantumultX重写规则
-      const urlMatch = rule.match(/^(.+?)\s+url\s+script-([^-]+)-([^-]+)\s+(.+)$/);
-      if (urlMatch) {
-        const [, pattern, type, bodyType, script] = urlMatch;
-        const requiresBody = bodyType === 'body' ? 1 : 0;
-        
-        // 转换为Surge脚本格式
-        surgeModule += `${name} = type=http-${type},pattern=${pattern},script-path=${script},requires-body=${requiresBody}\n`;
-      }
+  if (patterns && patterns.length > 0 && scriptPath) {
+    surgeModule += `[Script]\n`;
+    patterns.forEach((pattern, index) => {
+      surgeModule += `${name}${index > 0 ? index : ''} = type=http-response, pattern=${pattern}, script-path=${scriptPath}, requires-body=true, max-size=-1, timeout=60\n`;
     });
-    
-    // 提取定时任务
-    const cronMatch = content.match(/cronexp\s*=\s*["']([^"']+)["']/);
-    if (cronMatch && scriptUrl) {
-      surgeModule += `${name} = type=cron,cronexp="${cronMatch[1]}",script-path=${scriptUrl},wake-system=1\n`;
-    }
-    
-    surgeModule += '\n';
+    surgeModule += `\n`;
   }
   
-  // 提取并转换MITM主机名
-  const hostnames = extractMitm(content);
-  if (hostnames.length > 0) {
-    surgeModule += '[MITM]\n';
+  if (hostnames && hostnames.length > 0) {
+    surgeModule += `[MITM]\n`;
     surgeModule += `hostname = %APPEND% ${hostnames.join(', ')}\n`;
   }
   
@@ -193,47 +183,59 @@ function convertToSurgeModule(script: ScriptType): string {
 }
 
 /**
- * 保存转换后的插件/模块文件
+ * 直接从脚本内容中提取预配置的Loon插件和Surge模块
+ */
+function extractPreconfiguredPlugins(script: ScriptType): { loon: string | null, surge: string | null } {
+  const content = script.content;
+  
+  // 尝试提取预配置的Loon插件
+  const loonMatch = content.match(/Loon\n([\s\S]*?)(?=\n\n\n|$)/);
+  const loonPlugin = loonMatch ? loonMatch[1].trim() : null;
+  
+  // 尝试提取预配置的Surge模块
+  const surgeMatch = content.match(/Surge\n([\s\S]*?)(?=\n\n\n|$)/);
+  const surgeModule = surgeMatch ? surgeMatch[1].trim() : null;
+  
+  return { loon: loonPlugin, surge: surgeModule };
+}
+
+/**
+ * 保存转换后的插件/模块文件，只有当文件不存在或内容变化时才写入
  */
 async function saveConvertedFile(
   outputDir: string, 
   fileName: string, 
   content: string,
   extension: string
-): Promise<void> {
+): Promise<boolean> {
   try {
     const outputPath = path.join(outputDir, `${fileName}${extension}`);
-    await fs.writeFile(outputPath, content, 'utf8');
-    console.log(`Successfully saved to ${outputPath}`);
+    
+    // 检查文件是否已存在
+    let fileChanged = true;
+    try {
+      const existingContent = await fs.readFile(outputPath, 'utf8');
+      // 如果内容完全相同，不需要重写
+      if (existingContent === content) {
+        console.log(`File ${outputPath} already exists with identical content, skipping`);
+        fileChanged = false;
+      }
+    } catch (err) {
+      // 文件不存在，需要创建
+      console.log(`File ${outputPath} does not exist, creating new file`);
+    }
+    
+    // 只有当文件不存在或内容变化时才写入
+    if (fileChanged) {
+      await fs.writeFile(outputPath, content, 'utf8');
+      console.log(`Successfully saved to ${outputPath}`);
+    }
+    
+    return fileChanged;
   } catch (err) {
     console.error(`Error saving file ${fileName}:`, err);
+    return false;
   }
-}
-
-/**
- * 处理示例脚本格式中的注释格式转换
- */
-function extractCommentedRules(content: string): string[] {
-  // 查找注释块中的重写和MITM规则
-  const commentBlock = content.match(/\/\*\*([\s\S]*?)\*\//g);
-  if (!commentBlock) return [];
-  
-  const rules: string[] = [];
-  
-  // 遍历所有注释块
-  commentBlock.forEach(block => {
-    // 查找包含 [rewrite_local] 或 [mitm] 的注释块
-    if (block.includes('[rewrite_local]') || block.includes('[mitm]')) {
-      // 分割成行并清理注释符号
-      const lines = block.split('\n')
-        .map(line => line.replace(/^\s*\*\s*/, '').trim())
-        .filter(line => line && !line.startsWith('/*') && !line.startsWith('*/'));
-      
-      rules.push(...lines);
-    }
-  });
-  
-  return rules;
 }
 
 /**
@@ -244,20 +246,69 @@ async function main() {
     const scriptFiles = await getQuantumultXScripts();
     console.log(`Found ${scriptFiles.length} QuantumultX scripts to convert`);
     
+    let hasChanges = false;
+    
     for (const filePath of scriptFiles) {
       const script = await parseScriptInfo(filePath);
       console.log(`Converting ${script.name}...`);
       
-      // 转换为Loon插件
-      const loonPlugin = convertToLoonPlugin(script);
-      await saveConvertedFile(LOON_OUTPUT_DIR, script.name, loonPlugin, '.plugin');
+      // 尝试提取预配置插件
+      const preconfigured = extractPreconfiguredPlugins(script);
       
-      // 转换为Surge模块
-      const surgeModule = convertToSurgeModule(script);
-      await saveConvertedFile(SURGE_OUTPUT_DIR, script.name, surgeModule, '.sgmodule');
+      // 处理Loon插件
+      let loonContent;
+      if (preconfigured.loon) {
+        console.log(`Using preconfigured Loon plugin for ${script.name}`);
+        loonContent = preconfigured.loon;
+      } else {
+        console.log(`Generating Loon plugin for ${script.name}`);
+        loonContent = convertToLoonPlugin(script);
+      }
+      
+      const loonChanged = await saveConvertedFile(
+        LOON_OUTPUT_DIR, 
+        script.name.toLowerCase().replace(/\s+/g, '_'), 
+        loonContent, 
+        '.plugin'
+      );
+      
+      // 处理Surge模块
+      let surgeContent;
+      if (preconfigured.surge) {
+        console.log(`Using preconfigured Surge module for ${script.name}`);
+        surgeContent = preconfigured.surge;
+      } else {
+        console.log(`Generating Surge module for ${script.name}`);
+        surgeContent = convertToSurgeModule(script);
+      }
+      
+      const surgeChanged = await saveConvertedFile(
+        SURGE_OUTPUT_DIR, 
+        script.name.toLowerCase().replace(/\s+/g, '_'), 
+        surgeContent, 
+        '.sgmodule'
+      );
+      
+      // 如果任一文件有变化，记录有更改
+      if (loonChanged || surgeChanged) {
+        hasChanges = true;
+      }
     }
     
-    console.log('Conversion completed successfully!');
+    if (hasChanges) {
+      console.log('Conversion completed with changes!');
+      // 设置GitHub Actions输出变量
+      if (process.env.GITHUB_OUTPUT) {
+        const fs = require('fs');
+        fs.appendFileSync(process.env.GITHUB_OUTPUT, 'has_file_changes=true\n');
+      }
+    } else {
+      console.log('Conversion completed, no changes detected.');
+      if (process.env.GITHUB_OUTPUT) {
+        const fs = require('fs');
+        fs.appendFileSync(process.env.GITHUB_OUTPUT, 'has_file_changes=false\n');
+      }
+    }
   } catch (err) {
     console.error('Error in main process:', err);
     process.exit(1);
