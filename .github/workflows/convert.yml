@@ -11,11 +11,15 @@ on:
 jobs:
   convert:
     runs-on: ubuntu-latest
+    permissions:
+      # 给予工作流写入权限
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
         with:
           fetch-depth: 0  # 获取完整历史记录
+          token: ${{ github.token }}  # 使用默认令牌
 
       - name: Set up Node.js
         uses: actions/setup-node@v3
@@ -36,15 +40,24 @@ jobs:
       - name: Run conversion script
         run: ts-node scripts/convert.ts
         
-      - name: Commit and push changes
+      - name: Configure Git
         run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          git config --global user.name "GitHub Action"
+      
+      - name: Commit changes
+        run: |
           git add Loon/ Surge/
           git commit -m "Auto convert scripts: $(date +'%Y-%m-%d %H:%M:%S')" || echo "No changes to commit"
           
-          # 先拉取远程更改，解决可能的冲突
-          git pull --rebase origin main
+      - name: Fetch and rebase
+        run: |
+          git fetch origin main
+          git rebase origin/main || (git rebase --abort && git reset --hard origin/main && exit 1)
           
-          # 推送更改
-          git push
+      - name: Push changes
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ github.token }}
+          branch: ${{ github.ref }}
+          force: false
