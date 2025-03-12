@@ -10,7 +10,9 @@ const SURGE_OUTPUT_DIR = 'Surge/modules';
 type ScriptType = {
   name: string;
   desc?: string;
+  author?: string;
   content: string;
+  scriptUrl?: string;
 };
 
 /**
@@ -37,11 +39,22 @@ async function parseScriptInfo(filePath: string): Promise<ScriptType> {
     const fileName = path.basename(filePath);
     const name = fileName.replace(/\.(js|conf)$/, '');
     
-    // 尝试从脚本中提取描述信息
-    const descMatch = content.match(/\/\/\s*@(desc|description)\s+(.+)/i);
-    const desc = descMatch ? descMatch[2].trim() : `Converted from ${fileName}`;
+    // 提取脚本元数据
+    const nameMatch = content.match(/@name\s+(.+)/);
+    const descMatch = content.match(/@desc(?:ription)?\s+(.+)/);
+    const authorMatch = content.match(/@author\s+(.+)/);
     
-    return { name, desc, content };
+    // 尝试从重写规则中提取脚本URL
+    const scriptUrlMatch = content.match(/script-(?:response|request)-body\s+([^\s]+)/i) || 
+                         content.match(/script-path\s*=\s*["']?([^"'\s]+)["']?/i);
+    
+    return { 
+      name: nameMatch ? nameMatch[1].trim() : name,
+      desc: descMatch ? descMatch[1].trim() : `Converted from ${fileName}`,
+      author: authorMatch ? authorMatch[1].trim() : undefined,
+      content,
+      scriptUrl: scriptUrlMatch ? scriptUrlMatch[1].trim() : undefined
+    };
   } catch (err) {
     console.error(`Error parsing script ${filePath}:`, err);
     throw err;
@@ -49,41 +62,80 @@ async function parseScriptInfo(filePath: string): Promise<ScriptType> {
 }
 
 /**
+ * 提取QuantumultX重写规则
+ */
+function extractRewriteRules(content: string): string[] {
+  const rewriteSection = content.match(/\[rewrite_local\]([\s\S]*?)(?:\[|$)/);
+  if (!rewriteSection) return [];
+  
+  return rewriteSection[1].split('\n')
+    .map(line => line.trim())
+    .filter(line => line && !line.startsWith('#'));
+}
+
+/**
+ * 提取MITM主机名
+ */
+function extractMitm(content: string): string[] {
+  const mitmSection = content.match(/\[mitm\]([\s\S]*?)(?:\[|$)/);
+  if (!mitmSection) return [];
+  
+  const hostnameMatch = mitmSection[1].match(/hostname\s*=\s*([^,\n]+)/);
+  if (!hostnameMatch) return [];
+  
+  return hostnameMatch[1].split(',').map(host => host.trim());
+}
+
+/**
  * 将QuantumultX脚本转换为Loon插件
  */
 function convertToLoonPlugin(script: ScriptType): string {
-  const { name, desc, content } = script;
+  const { name, desc, author, content, scriptUrl } = script;
   
-  // 分析脚本内容
-  const httpMatch = content.match(/http-(?:response|request)/);
-  const cronMatch = content.match(/cronexp\s*=\s*["']([^"']+)["']/);
+  let loonPlugin = `#!name=${name}\n#!desc=${desc}\n`;
+  if (author) {
+    loonPlugin += `#!author=${author}\n`;
+  }
+  loonPlugin += '\n';
   
-  let loonPlugin = `#!name=${name}\n#!desc=${desc}\n\n`;
+  // 提取重写规则并转换为Loon格式
+  const rewriteRules = extractRewriteRules(content);
+  const hasScriptRules = rewriteRules.length > 0;
   
-  if (httpMatch) {
-    // HTTP 脚本转换
-    const urlRegexMatch = content.match(/url\s*=\s*["']([^"']+)["']/);
-    const scriptUrlMatch = content.match(/script-path\s*=\s*["']([^"']+)["']/);
+  if (hasScriptRules || scriptUrl) {
+    loonPlugin += '[Script]\n';
     
-    if (urlRegexMatch && scriptUrlMatch) {
-      loonPlugin += `[Script]\n`;
-      loonPlugin += `http-response ${urlRegexMatch[1]} script-path=${scriptUrlMatch[1]}, requires-body=true, tag=${name}\n\n`;
-    }
-  } else if (cronMatch) {
-    // 定时任务脚本转换
-    const scriptUrlMatch = content.match(/script-path\s*=\s*["']([^"']+)["']/);
+    // 转换重写规则
+    rewriteRules.forEach(rule => {
+      // 解析QuantumultX重写规则
+      const urlMatch = rule.match(/^(.+?)\s+url\s+script-([^-]+)-([^-]+)\s+(.+)$/);
+      if (urlMatch) {
+        const [, pattern, type, bodyType, script] = urlMatch;
+        const requiresBody = bodyType === 'body';
+        
+        // 转换为Loon脚本格式
+        if (type === 'response') {
+          loonPlugin += `http-response ${pattern} script-path=${script}, requires-body=${requiresBody}, tag=${name}\n`;
+        } else if (type === 'request') {
+          loonPlugin += `http-request ${pattern} script-path=${script}, requires-body=${requiresBody}, tag=${name}\n`;
+        }
+      }
+    });
     
-    if (cronMatch && scriptUrlMatch) {
-      loonPlugin += `[Script]\n`;
-      loonPlugin += `cron "${cronMatch[1]}" script-path=${scriptUrlMatch[1]}, tag=${name}\n\n`;
+    // 提取定时任务
+    const cronMatch = content.match(/cronexp\s*=\s*["']([^"']+)["']/);
+    if (cronMatch && scriptUrl) {
+      loonPlugin += `cron "${cronMatch[1]}" script-path=${scriptUrl}, tag=${name}\n`;
     }
+    
+    loonPlugin += '\n';
   }
   
-  // 提取并转换 mitm 部分
-  const mitmMatch = content.match(/hostname\s*=\s*([^,\n]+)/);
-  if (mitmMatch) {
-    loonPlugin += `[MITM]\n`;
-    loonPlugin += `hostname = ${mitmMatch[1].trim()}\n`;
+  // 提取并转换MITM主机名
+  const hostnames = extractMitm(content);
+  if (hostnames.length > 0) {
+    loonPlugin += '[MITM]\n';
+    loonPlugin += `hostname = ${hostnames.join(', ')}\n`;
   }
   
   return loonPlugin;
@@ -93,39 +145,48 @@ function convertToLoonPlugin(script: ScriptType): string {
  * 将QuantumultX脚本转换为Surge模块
  */
 function convertToSurgeModule(script: ScriptType): string {
-  const { name, desc, content } = script;
+  const { name, desc, author, content, scriptUrl } = script;
   
-  // 分析脚本内容
-  const httpMatch = content.match(/http-(?:response|request)/);
-  const cronMatch = content.match(/cronexp\s*=\s*["']([^"']+)["']/);
+  let surgeModule = `#!name=${name}\n#!desc=${desc}\n`;
+  if (author) {
+    surgeModule += `#!author=${author}\n`;
+  }
+  surgeModule += '\n';
   
-  let surgeModule = `#!name=${name}\n#!desc=${desc}\n\n`;
+  // 提取重写规则并转换为Surge格式
+  const rewriteRules = extractRewriteRules(content);
+  const hasScriptRules = rewriteRules.length > 0;
   
-  if (httpMatch) {
-    // HTTP 脚本转换
-    const urlRegexMatch = content.match(/url\s*=\s*["']([^"']+)["']/);
-    const scriptUrlMatch = content.match(/script-path\s*=\s*["']([^"']+)["']/);
+  if (hasScriptRules || scriptUrl) {
+    surgeModule += '[Script]\n';
     
-    if (urlRegexMatch && scriptUrlMatch) {
-      surgeModule += `[Script]\n`;
-      // Surge中HTTP脚本格式略有不同
-      surgeModule += `${name} = type=http-response,pattern=${urlRegexMatch[1]},script-path=${scriptUrlMatch[1]},requires-body=1\n\n`;
-    }
-  } else if (cronMatch) {
-    // 定时任务脚本转换
-    const scriptUrlMatch = content.match(/script-path\s*=\s*["']([^"']+)["']/);
+    // 转换重写规则
+    rewriteRules.forEach(rule => {
+      // 解析QuantumultX重写规则
+      const urlMatch = rule.match(/^(.+?)\s+url\s+script-([^-]+)-([^-]+)\s+(.+)$/);
+      if (urlMatch) {
+        const [, pattern, type, bodyType, script] = urlMatch;
+        const requiresBody = bodyType === 'body' ? 1 : 0;
+        
+        // 转换为Surge脚本格式
+        surgeModule += `${name} = type=http-${type},pattern=${pattern},script-path=${script},requires-body=${requiresBody}\n`;
+      }
+    });
     
-    if (cronMatch && scriptUrlMatch) {
-      surgeModule += `[Script]\n`;
-      surgeModule += `${name} = type=cron,cronexp="${cronMatch[1]}",script-path=${scriptUrlMatch[1]}\n\n`;
+    // 提取定时任务
+    const cronMatch = content.match(/cronexp\s*=\s*["']([^"']+)["']/);
+    if (cronMatch && scriptUrl) {
+      surgeModule += `${name} = type=cron,cronexp="${cronMatch[1]}",script-path=${scriptUrl},wake-system=1\n`;
     }
+    
+    surgeModule += '\n';
   }
   
-  // 提取并转换 mitm 部分
-  const mitmMatch = content.match(/hostname\s*=\s*([^,\n]+)/);
-  if (mitmMatch) {
-    surgeModule += `[MITM]\n`;
-    surgeModule += `hostname = %APPEND% ${mitmMatch[1].trim()}\n`;
+  // 提取并转换MITM主机名
+  const hostnames = extractMitm(content);
+  if (hostnames.length > 0) {
+    surgeModule += '[MITM]\n';
+    surgeModule += `hostname = %APPEND% ${hostnames.join(', ')}\n`;
   }
   
   return surgeModule;
@@ -147,6 +208,32 @@ async function saveConvertedFile(
   } catch (err) {
     console.error(`Error saving file ${fileName}:`, err);
   }
+}
+
+/**
+ * 处理示例脚本格式中的注释格式转换
+ */
+function extractCommentedRules(content: string): string[] {
+  // 查找注释块中的重写和MITM规则
+  const commentBlock = content.match(/\/\*\*([\s\S]*?)\*\//g);
+  if (!commentBlock) return [];
+  
+  const rules: string[] = [];
+  
+  // 遍历所有注释块
+  commentBlock.forEach(block => {
+    // 查找包含 [rewrite_local] 或 [mitm] 的注释块
+    if (block.includes('[rewrite_local]') || block.includes('[mitm]')) {
+      // 分割成行并清理注释符号
+      const lines = block.split('\n')
+        .map(line => line.replace(/^\s*\*\s*/, '').trim())
+        .filter(line => line && !line.startsWith('/*') && !line.startsWith('*/'));
+      
+      rules.push(...lines);
+    }
+  });
+  
+  return rules;
 }
 
 /**
