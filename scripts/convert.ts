@@ -1,10 +1,12 @@
 import * as fs from 'fs-extra';
 import * as path from 'path';
+import * as crypto from 'crypto';
 
 // 定义输入和输出目录
 const QUANTUMULTX_DIR = 'QuantumultX';
 const LOON_OUTPUT_DIR = 'Loon/plugins';
 const SURGE_OUTPUT_DIR = 'Surge/modules';
+const HASH_FILE = '.script_hashes.json';
 
 // 定义脚本类型
 type ScriptType = {
@@ -15,6 +17,44 @@ type ScriptType = {
   patterns?: string[];   // URL模式
   hostnames?: string[];  // 主机名
 };
+
+// 定义哈希记录类型
+type HashRecord = {
+  [filePath: string]: string;  // 文件路径: 文件哈希
+};
+
+/**
+ * 计算文件内容的MD5哈希值
+ */
+function calculateFileHash(content: string): string {
+  return crypto.createHash('md5').update(content).digest('hex');
+}
+
+/**
+ * 加载保存的哈希值
+ */
+async function loadHashRecords(): Promise<HashRecord> {
+  try {
+    if (await fs.pathExists(HASH_FILE)) {
+      const data = await fs.readFile(HASH_FILE, 'utf8');
+      return JSON.parse(data);
+    }
+  } catch (err) {
+    console.warn(`Warning: Failed to load hash records: ${err}. Creating new hash record.`);
+  }
+  return {};
+}
+
+/**
+ * 保存哈希值记录
+ */
+async function saveHashRecords(hashRecords: HashRecord): Promise<void> {
+  try {
+    await fs.writeFile(HASH_FILE, JSON.stringify(hashRecords, null, 2), 'utf8');
+  } catch (err) {
+    console.error(`Error saving hash records: ${err}`);
+  }
+}
 
 /**
  * 获取所有QuantumultX脚本文件
@@ -200,7 +240,7 @@ function generateSurgeModule(scriptInfo: ScriptType): string {
 }
 
 /**
- * 保存配置到文件，只有当文件不存在或内容变化时才写入
+ * 保存配置到文件
  */
 async function saveConfig(
   outputDir: string, 
@@ -209,9 +249,7 @@ async function saveConfig(
   extension: string
 ): Promise<boolean> {
   try {
-    // 确保输出目录存在
     await fs.ensureDir(outputDir);
-    
     const outputPath = path.join(outputDir, `${fileName}${extension}`);
     
     // 检查文件是否已存在
@@ -250,14 +288,30 @@ async function main() {
     await fs.ensureDir(LOON_OUTPUT_DIR);
     await fs.ensureDir(SURGE_OUTPUT_DIR);
     
+    // 获取所有QX脚本
     const scriptFiles = await getQuantumultXScripts();
     console.log(`找到 ${scriptFiles.length} 个 QuantumultX 脚本`);
     
+    // 加载保存的哈希记录
+    const hashRecords = await loadHashRecords();
     let hasChanges = false;
     
+    // 处理每个脚本
     for (const filePath of scriptFiles) {
       try {
+        // 读取文件内容
+        const content = await fs.readFile(filePath, 'utf8');
+        const currentHash = calculateFileHash(content);
+        
+        // 检查是否需要处理此文件
+        if (hashRecords[filePath] === currentHash) {
+          console.log(`文件 ${filePath} 未变更，跳过处理`);
+          continue;
+        }
+        
         console.log(`处理脚本文件: ${filePath}`);
+        
+        // 提取脚本信息
         const scriptInfo = await extractScriptInfo(filePath);
         
         // 如果没有模式或脚本路径，跳过此文件
@@ -288,6 +342,9 @@ async function main() {
         if (loonChanged || surgeChanged) {
           hasChanges = true;
         }
+        
+        // 更新哈希记录
+        hashRecords[filePath] = currentHash;
       } catch (err) {
         console.error(`处理 ${filePath} 时出错:`, err);
         // 继续处理下一个文件，不中断整个流程
@@ -295,9 +352,12 @@ async function main() {
       }
     }
     
+    // 保存哈希记录
+    await saveHashRecords(hashRecords);
+    
+    // 设置GitHub Actions输出
     if (hasChanges) {
       console.log('处理完成，有文件变更!');
-      // 设置GitHub Actions输出变量
       if (process.env.GITHUB_OUTPUT) {
         await fs.appendFile(process.env.GITHUB_OUTPUT, 'has_file_changes=true\n');
       }
