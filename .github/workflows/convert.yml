@@ -27,7 +27,7 @@ jobs:
         uses: actions/setup-node@v3
         with:
           node-version: '16'
-          cache: 'npm'  # 缓存npm依赖以加速构建
+          # 移除 cache 选项，因为没有锁定文件
 
       - name: Install dependencies
         run: |
