@@ -15,9 +15,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0  # 获取完整历史记录
+        uses: actions/checkout@v2
 
       - name: Set up Node.js
         uses: actions/setup-node@v3
@@ -30,25 +28,24 @@ jobs:
           npm install --save @types/node fs-extra axios
           npm install --save-dev @types/fs-extra
 
-      - name: Clean existing output directories
+      - name: Clean output directories
         run: |
-          # 删除现有的转换目录
           rm -rf Loon
           rm -rf Surge
-          
-          # 重新创建干净的目录
           mkdir -p Loon/plugins
           mkdir -p Surge/modules
-          
+
       - name: Run conversion script
-        run: ts-node scripts/convert.ts
-        
-      - name: Force push changes
         run: |
-          git config --global user.email "action@github.com"
-          git config --global user.name "GitHub Action"
-          git add Loon/ Surge/
-          git commit -m "Auto convert scripts: $(date +'%Y-%m-%d %H:%M:%S')" || echo "No changes to commit"
+          ts-node scripts/convert.ts
           
-          # 强制推送更改
-          git push --force
+      - name: Configure Git
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+      - name: Commit and push changes
+        run: |
+          git add Loon/ Surge/
+          git commit -m "Auto convert scripts: $(date +'%Y-%m-%d %H:%M:%S')"
+          git push
