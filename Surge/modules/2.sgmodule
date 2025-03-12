@@ -1,6 +1,0 @@
-#!name=2
-#!desc=Converted from 2.js
-
-[Script]
-2 = type=http-response,pattern=^https:\/\/be\.aimirror\.fun\/.*,script-path=https://raw.githubusercontent.com/Mikephie/Script/main/qx/aimirror.js,requires-body=1
-

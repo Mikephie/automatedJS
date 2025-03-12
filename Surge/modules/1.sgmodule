@@ -1,8 +1,11 @@
-#!name=1
-#!desc=Converted from 1.js
+#!name = 1 🔐APP
+#!desc = 1 解锁
+#!author = 🅜ⓘ🅚ⓔ🅟ⓗ🅘ⓔ
+#!category=🔐APP
+#!icon = https://raw.githubusercontent.com/Mikephie/icons/main/icon/1.png
 
 [Script]
-1 = type=http-response,pattern=^http:\/\/format-api\.netpock\.com\/api\/user_info,script-path=https://raw.githubusercontent.com/Mikephie/Script/main/qx/bzg.js,requires-body=1
+1 = type=http-response, pattern=script-response-body, script-path=https://raw.githubusercontent.com/Mikephie/Script/main/qx/bzg.js, requires-body=true, max-size=-1, timeout=60
 
 [MITM]
 hostname = %APPEND% format-api.netpock.com
