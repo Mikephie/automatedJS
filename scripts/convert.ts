@@ -48,24 +48,70 @@ async function extractConfigs(filePath: string): Promise<ScriptType> {
     const authorMatch = content.match(/const\s+author\s*=\s*["']([^"']+)["']/);
     const author = authorMatch ? authorMatch[1] : '🅜ⓘ🅚ⓔ🅟ⓗ🅘ⓔ';
     
-    // 提取Loon配置
+    // 提取或构建Loon配置
     let loonConfig = '';
+    
+    // 尝试提取预配置的Loon部分
     const loonMatch = content.match(/Loon\n([\s\S]*?)(?=\n\n\n|Surge\n|$)/);
     if (loonMatch && loonMatch[1].trim()) {
       loonConfig = loonMatch[1].trim();
+    } else {
+      // 如果没有预配置，尝试从脚本中提取元素构建一个基本配置
+      const patternMatch = content.match(/http-response\s+([^\s]+)/);
+      const scriptPathMatch = content.match(/script-path=([^,\s]+)/);
+      const hostnameMatch = content.match(/hostname\s*=\s*([^,\n]+)/);
       
-      // 处理图标URL和应用名称
-      loonConfig = processConfig(loonConfig, appName, fileName, author, 'loon');
+      if (patternMatch && scriptPathMatch) {
+        const pattern = patternMatch[1].trim();
+        const scriptPath = scriptPathMatch[1].trim();
+        const hostname = hostnameMatch ? hostnameMatch[1].trim() : '';
+        
+        loonConfig = `#!name = ${appName} 🔐APP\n`;
+        loonConfig += `#!desc = 插件\n`;
+        loonConfig += `#!author = ${author}\n`;
+        loonConfig += `#!icon = https://raw.githubusercontent.com/Mikephie/icons/main/icon/${appName.toLowerCase().replace(/\s+/g, '')}.png\n`;
+        loonConfig += `#appCategory = select,"✅签到","🚫广告","🔐APP","🛠️工具"\n\n`;
+        loonConfig += `[Script]\n`;
+        loonConfig += `http-response ${pattern} script-path=${scriptPath}, requires-body=true, timeout=60, tag=${fileName.toLowerCase()}\n\n`;
+        
+        if (hostname) {
+          loonConfig += `[MITM]\n`;
+          loonConfig += `hostname = ${hostname}\n`;
+        }
+      }
     }
     
-    // 提取Surge配置
+    // 提取或构建Surge配置
     let surgeConfig = '';
+    
+    // 尝试提取预配置的Surge部分
     const surgeMatch = content.match(/Surge\n([\s\S]*?)(?=\n\n\n|Loon\n|$)/);
     if (surgeMatch && surgeMatch[1].trim()) {
       surgeConfig = surgeMatch[1].trim();
+    } else {
+      // 如果没有预配置，尝试从脚本中提取元素构建一个基本配置
+      const patternMatch = content.match(/pattern=([^,\s]+)/);
+      const scriptPathMatch = content.match(/script-path=([^,\s]+)/);
+      const hostnameMatch = content.match(/hostname\s*=\s*([^,\n]+)/);
       
-      // 处理图标URL和应用名称
-      surgeConfig = processConfig(surgeConfig, appName, fileName, author, 'surge');
+      if (patternMatch && scriptPathMatch) {
+        const pattern = patternMatch[1].trim();
+        const scriptPath = scriptPathMatch[1].trim();
+        const hostname = hostnameMatch ? hostnameMatch[1].trim() : '';
+        
+        surgeConfig = `#!name = ${appName} 🔐APP\n`;
+        surgeConfig += `#!desc = 网页游览 - 模块\n`;
+        surgeConfig += `#!author = ${author}\n`;
+        surgeConfig += `#!category=🔐APP\n`;
+        surgeConfig += `#!icon = https://raw.githubusercontent.com/Mikephie/icons/main/icon/${appName.toLowerCase().replace(/\s+/g, '')}.png\n\n`;
+        surgeConfig += `[Script]\n`;
+        surgeConfig += `${appName} = type=http-response, pattern=${pattern}, script-path=${scriptPath}, requires-body=true, max-size=-1, timeout=60\n\n`;
+        
+        if (hostname) {
+          surgeConfig += `[MITM]\n`;
+          surgeConfig += `hostname = %APPEND% ${hostname}\n`;
+        }
+      }
     }
     
     return {
@@ -138,6 +184,9 @@ function processConfig(
       // 在作者行后添加分类行
       config = config.replace(authorReplacement, `${authorReplacement}\n${categoryReplacement}`);
     }
+    
+    // 修复 [Script] // 格式问题
+    config = config.replace(/\[Script\]\s*\/\//, '[Script]');
   }
   
   // Loon特有的处理
@@ -157,6 +206,13 @@ function processConfig(
         // 否则在作者行后添加
         config = config.replace(authorReplacement, `${authorReplacement}\n${appCategoryReplacement}`);
       }
+    }
+    
+    // 移除脚本主体内容 - 只保留配置部分
+    // 找到 [MITM] 部分后的内容全部移除
+    const mitmMatch = config.match(/(\[MITM\][^\n]*(?:\n[^\n]+)*)/);
+    if (mitmMatch) {
+      config = config.substring(0, config.indexOf(mitmMatch[0]) + mitmMatch[0].length);
     }
   }
   
