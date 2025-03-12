@@ -1,0 +1,33 @@
+#!name = 📜 百转格 解锁 VIP 脚本
+📅 更新时间：2024年10月28日
+🔓 功能：解锁永久 VIP
+🔆 🅜ⓘ🅚ⓔ🅟ⓗ🅘ⓔ
+
+𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹
+
+[rewrite_local]
+^http:\/\/format-api\.netpock\.com\/api\/user_info url script-response-body https://raw.githubusercontent.com/Mikephie/Script/main/qx/bzg.js
+
+
+[mitm] 
+hostname = format-api.netpock.com 🔐APP
+#!desc = 网页游览 - 模块
+#!author = 🅜ⓘ🅚ⓔ🅟ⓗ🅘ⓔ
+#!category=🔐APP
+#!icon = https://raw.githubusercontent.com/Mikephie/icons/main/icon/📜百转格解锁vip脚本📅更新时间：2024年10月28日🔓功能：解锁永久vip🔆🅜ⓘ🅚ⓔ🅟ⓗ🅘ⓔ𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹[rewrite_local]^http:\/\/format-api\.netpock\.com\/api\/user_infourlscript-response-bodyhttps://raw.githubusercontent.com/mikephie/script/main/qx/bzg.js[mitm]hostname=format-api.netpock.com.png
+
+[Script]
+📜 百转格 解锁 VIP 脚本
+📅 更新时间：2024年10月28日
+🔓 功能：解锁永久 VIP
+🔆 🅜ⓘ🅚ⓔ🅟ⓗ🅘ⓔ
+
+𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹𒊹
+
+[rewrite_local]
+^http:\/\/format-api\.netpock\.com\/api\/user_info url script-response-body https://raw.githubusercontent.com/Mikephie/Script/main/qx/bzg.js
+
+
+[mitm] 
+hostname = format-api.netpock.com = type=http-response, pattern=^http:\/\/format-api\.netpock\.com\/api\/user_info, script-path=https://raw.githubusercontent.com/Mikephie/Script/main/qx/bzg.js, requires-body=true, max-size=-1, timeout=60
+
