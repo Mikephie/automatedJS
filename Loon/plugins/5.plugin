@@ -1,6 +1,3 @@
-#!name = AppRaven 🔐APP
-#!author = 🅜ⓘ🅚ⓔ🅟ⓗ🅘ⓔ
-#appCategory = select,"✅签到","🚫广告","🔐APP","🛠️工具"
 http-response ^https:\/\/appraven\.net\/appraven\/graphql script-path=https://raw.githubusercontent.com/Mikephie/Script/main/qx/AppRaven.js, requires-body=true, timeout=60
 
 [MITM]
