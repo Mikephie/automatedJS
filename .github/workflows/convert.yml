@@ -3,7 +3,8 @@ name: Convert Scripts
 on:
   push:
     paths:
-      - 'QuantumultX/**'
+      - 'QuantumultX/**/*.js'
+      - 'QuantumultX/**/*.conf'
     branches:
       - main
   workflow_dispatch:
@@ -20,12 +21,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0
+          fetch-depth: 0  # 获取完整历史以便执行git操作
 
       - name: Set up Node.js
         uses: actions/setup-node@v3
         with:
           node-version: '16'
+          cache: 'npm'  # 缓存npm依赖以加速构建
 
       - name: Install dependencies
         run: |
@@ -33,10 +35,8 @@ jobs:
           npm install --save @types/node fs-extra axios
           npm install --save-dev @types/fs-extra
 
-      - name: Clean output directories
+      - name: Create output directories
         run: |
-          rm -rf Loon
-          rm -rf Surge
           mkdir -p Loon/plugins
           mkdir -p Surge/modules
 
@@ -44,6 +44,10 @@ jobs:
         id: convert
         run: |
           ts-node scripts/convert.ts
+        env:
+          # 添加环境变量以便脚本可以访问GitHub上下文
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_ACTION: "true"
 
       - name: Configure Git
         run: |
@@ -54,21 +58,49 @@ jobs:
         id: check_changes
         run: |
           git add Loon/ Surge/
-          # 检查是否有实际变化
           if git diff --staged --quiet; then
             echo "No changes detected"
             echo "has_changes=false" >> $GITHUB_OUTPUT
           else
             echo "Changes detected"
             echo "has_changes=true" >> $GITHUB_OUTPUT
+            
+            # 获取已修改的文件列表
+            echo "modified_files<<EOF" >> $GITHUB_OUTPUT
+            git diff --staged --name-only >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
           fi
 
       - name: Commit and push changes
         if: steps.check_changes.outputs.has_changes == 'true'
         run: |
-          git commit -m "Auto convert scripts: $(date +'%Y-%m-%d %H:%M:%S')"
-          git fetch origin
-          git pull origin main --no-rebase
+          # 使用更详细的提交信息
+          MODIFIED_FILES="${{ steps.check_changes.outputs.modified_files }}"
+          NUMBER_OF_FILES=$(echo "$MODIFIED_FILES" | wc -l)
+          COMMIT_MSG="Auto convert scripts: Updated $NUMBER_OF_FILES file(s) at $(date +'%Y-%m-%d %H:%M:%S')"
+          
+          git commit -m "$COMMIT_MSG"
+          
+          # 处理可能的冲突
+          git pull --rebase origin main || {
+            echo "处理可能的合并冲突"
+            git status
+            # 如果出现冲突，优先使用本地更改
+            git checkout --ours .
+            git add .
+            git rebase --continue
+          }
+          
           git push origin main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload summary
+        if: steps.check_changes.outputs.has_changes == 'true'
+        run: |
+          echo "### 脚本转换结果 :rocket:" >> $GITHUB_STEP_SUMMARY
+          echo "转换时间: $(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_STEP_SUMMARY
+          echo "更新的文件:" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.check_changes.outputs.modified_files }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
