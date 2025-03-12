@@ -1,0 +1,28 @@
+{
+  "name": "quantumultx-converter",
+  "version": "1.0.0",
+  "description": "Convert QuantumultX scripts to Loon plugins and Surge modules",
+  "main": "scripts/convert.ts",
+  "scripts": {
+    "convert": "ts-node scripts/convert.ts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "quantumultx",
+    "loon",
+    "surge",
+    "converter"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@types/node": "^18.11.9",
+    "fs-extra": "^10.1.0",
+    "axios": "^1.6.0"
+  },
+  "devDependencies": {
+    "@types/fs-extra": "^9.0.13",
+    "typescript": "^4.8.4",
+    "ts-node": "^10.9.1"
+  }
+}
