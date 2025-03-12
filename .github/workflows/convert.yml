@@ -54,7 +54,7 @@ jobs:
           git fetch origin
           git log --oneline --graph --all -n 5
           # Pull with merge (instead of rebase) to handle conflicts safely
-          git pull origin main --no-rebase || echo "Pull failed, proceeding with local changes"
+          git pull origin main --no-rebase
           # Push the result
-          git push origin main || echo "Git push failed"
+          git push origin main
         shell: bash
