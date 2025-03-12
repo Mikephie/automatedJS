@@ -38,14 +38,15 @@ jobs:
       - name: Run conversion script
         run: |
           ts-node scripts/convert.ts
-          
+
       - name: Configure Git
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          
+
       - name: Commit and push changes
         run: |
           git add Loon/ Surge/
-          git commit -m "Auto convert scripts: $(date +'%Y-%m-%d %H:%M:%S')"
+          git commit -m "Auto convert scripts: $(date +'%Y-%m-%d %H:%M:%S')" || echo "No changes to commit"
+          git pull --rebase  # Fetch and rebase local changes on top of remote changes
           git push
