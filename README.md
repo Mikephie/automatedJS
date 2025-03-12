@@ -13,11 +13,48 @@
 ## 目录结构
 
 ```
-├── qx/               # 存放 QuantumultX 脚本
-├── loon/             # 生成的 Loon 插件
-├── surge/            # 生成的 Surge 模块
-├── script-converter.js  # 转换脚本
-└── .github/workflows/   # GitHub Actions 工作流配置
+# 项目结构
+
+```
+.
+├── .github
+│   └── workflows
+│       └── convert.yml     # GitHub Actions 工作流配置
+├── QuantumultX/            # 存放源 QuantumultX 脚本的目录
+│   ├── script1.js          # 示例脚本文件
+│   └── script2.js
+├── Loon                    # Loon 插件输出目录
+│   └── plugins/            # 转换后的 Loon 插件存放处
+│       ├── script1.plugin
+│       └── script2.plugin
+├── Surge                   # Surge 模块输出目录
+│   └── modules/            # 转换后的 Surge 模块存放处
+│       ├── script1.sgmodule
+│       └── script2.sgmodule
+├── scripts/                # 存放工具脚本
+│   └── convert.ts          # 转换脚本
+├── README.md               # 项目说明文档
+├── package.json            # Node.js 项目配置
+└── tsconfig.json           # TypeScript 配置
+```
+
+## 关键文件说明
+
+1. **`.github/workflows/convert.yml`**
+   - GitHub Actions 工作流配置文件
+   - 定义了自动转换的触发条件和执行步骤
+
+2. **`scripts/convert.ts`**
+   - 核心转换脚本
+   - 负责解析 QuantumultX 脚本并转换为 Loon 插件和 Surge 模块格式
+
+3. **`QuantumultX/`**
+   - 存放您原始的 QuantumultX 脚本文件
+   - 向此目录添加文件会触发自动转换
+
+4. **`Loon/plugins/` 和 `Surge/modules/`**
+   - 存放转换后的输出文件
+   - 这些目录由转换脚本自动生成和更新
 ```
 
 ## 使用方法
