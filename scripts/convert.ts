@@ -1,265 +1,188 @@
-import * as fs from 'fs-extra';
-import * as path from 'path';
+const fs = require('fs');
+const path = require('path');
 
-// 定义输入和输出目录
-const QUANTUMULTX_DIR = 'QuantumultX';
-const LOON_OUTPUT_DIR = 'Loon/plugins';
-const SURGE_OUTPUT_DIR = 'Surge/modules';
-
-// 定义脚本类型
-type ScriptType = {
-  fileName: string;      // 原始文件名
-  appName?: string;      // 应用名称
-  author?: string;       // 作者
-  scriptPath?: string;   // 脚本路径
-  patterns?: string[];   // URL模式
-  hostnames?: string[];  // 主机名
+// 配置
+const config = {
+  // 图标路径前缀
+  iconBaseUrl: 'https://raw.githubusercontent.com/Mikephie/icons/main/icon/',
+  // 输出目录
+  outputDirs: {
+    loon: './loon',
+    surge: './surge'
+  },
+  // 应用类别映射 (可以根据关键词自动分类)
+  appCategories: {
+    default: "🔐APP",
+    keywords: {
+      "签到": "✅签到",
+      "广告": "🚫广告",
+      "工具": "🛠️工具"
+    }
+  }
 };
 
 /**
- * 获取所有QuantumultX脚本文件
+ * 解析QX脚本，提取必要信息
+ * @param {string} scriptContent - QX脚本内容
+ * @returns {Object} 解析后的脚本信息
  */
-async function getQuantumultXScripts(): Promise<string[]> {
+function parseQxScript(scriptContent) {
+  // 提取应用名称 (通常在注释或者脚本名中)
+  let appName = '';
+  const nameMatch = scriptContent.match(/[\*📜]\s*✨\s*([^✨]+)\s*✨/);
+  if (nameMatch && nameMatch[1]) {
+    appName = nameMatch[1].trim();
+  }
+  
+  // 提取作者信息 (可能在注释中)
+  let author = '🅜ⓘ🅚ⓔ🅟ⓗ🅘ⓔ'; // 默认作者
+  
+  // 提取URL模式
+  const patternMatch = scriptContent.match(/pattern=([^,]+)|url\s+([^\s]+)/);
+  const pattern = patternMatch ? (patternMatch[1] || patternMatch[2]) : '';
+  
+  // 提取脚本路径
+  const scriptPathMatch = scriptContent.match(/script-path=([^,\s]+)|script-response-body\s+([^\s]+)/);
+  const scriptPath = scriptPathMatch ? (scriptPathMatch[1] || scriptPathMatch[2]) : '';
+  
+  // 提取主机名
+  const hostnameMatch = scriptContent.match(/hostname\s*=\s*([^\s]+)/);
+  const hostname = hostnameMatch ? hostnameMatch[1] : '';
+  
+  // 确定应用类别
+  let appCategory = config.appCategories.default;
+  for (const [keyword, category] of Object.entries(config.appCategories.keywords)) {
+    if (scriptContent.toLowerCase().includes(keyword.toLowerCase())) {
+      appCategory = category;
+      break;
+    }
+  }
+  
+  // 从应用名称生成图标文件名
+  const iconFileName = appName.toLowerCase().replace(/\s+/g, '') + '.png';
+  const iconUrl = `${config.iconBaseUrl}${iconFileName}`;
+  
+  return {
+    appName,
+    author,
+    pattern,
+    scriptPath,
+    hostname,
+    appCategory,
+    iconUrl
+  };
+}
+
+/**
+ * 生成Loon插件内容
+ * @param {Object} scriptInfo - 脚本信息
+ * @returns {string} Loon插件内容
+ */
+function generateLoonPlugin(scriptInfo) {
+  const { appName, author, pattern, scriptPath, hostname, appCategory, iconUrl } = scriptInfo;
+  
+  return `#!name = ${appName} ${appCategory}
+#!desc = 插件
+#!author = ${author}
+#!icon = ${iconUrl}
+#!appCategory = select,"✅签到","🚫广告","🔐APP","🛠️工具"
+
+[Script]
+http-response ${pattern} script-path=${scriptPath}, requires-body=true, timeout=60, tag=${appName.toLowerCase()}
+
+[MITM]
+hostname = ${hostname}
+`;
+}
+
+/**
+ * 生成Surge模块内容
+ * @param {Object} scriptInfo - 脚本信息
+ * @returns {string} Surge模块内容
+ */
+function generateSurgeModule(scriptInfo) {
+  const { appName, author, pattern, scriptPath, hostname, appCategory, iconUrl } = scriptInfo;
+  
+  return `#!name = ${appName} ${appCategory}
+#!desc = 网页游览 - 模块
+#!author = ${author}
+#!category=${appCategory}
+#!icon = ${iconUrl}
+
+[Script]
+${appName} = type=http-response, pattern=${pattern}, script-path=${scriptPath}, requires-body=true, max-size=-1, timeout=60
+
+[MITM]
+hostname = %APPEND% ${hostname}
+`;
+}
+
+/**
+ * 处理单个QX脚本文件
+ * @param {string} filePath - QX脚本文件路径
+ */
+function processQxScript(filePath) {
   try {
-    const files = await fs.readdir(QUANTUMULTX_DIR);
-    return files
-      .filter(file => file.endsWith('.js') || file.endsWith('.conf'))
-      .map(file => path.join(QUANTUMULTX_DIR, file));
-  } catch (err) {
-    console.error('Error reading QuantumultX directory:', err);
-    return [];
+    const scriptContent = fs.readFileSync(filePath, 'utf8');
+    const scriptInfo = parseQxScript(scriptContent);
+    const fileName = path.basename(filePath, '.js');
+    
+    // 确保输出目录存在
+    if (!fs.existsSync(config.outputDirs.loon)) {
+      fs.mkdirSync(config.outputDirs.loon, { recursive: true });
+    }
+    if (!fs.existsSync(config.outputDirs.surge)) {
+      fs.mkdirSync(config.outputDirs.surge, { recursive: true });
+    }
+    
+    // 生成并写入Loon插件
+    const loonContent = generateLoonPlugin(scriptInfo);
+    fs.writeFileSync(`${config.outputDirs.loon}/${fileName}.plugin`, loonContent);
+    
+    // 生成并写入Surge模块
+    const surgeContent = generateSurgeModule(scriptInfo);
+    fs.writeFileSync(`${config.outputDirs.surge}/${fileName}.sgmodule`, surgeContent);
+    
+    console.log(`Successfully processed: ${fileName}`);
+  } catch (error) {
+    console.error(`Error processing ${filePath}:`, error);
   }
 }
 
 /**
- * 从脚本文件中提取关键信息
+ * 处理QX脚本目录下的所有脚本
+ * @param {string} directoryPath - QX脚本目录路径
  */
-async function extractScriptInfo(filePath: string): Promise<ScriptType> {
+function processQxDirectory(directoryPath) {
   try {
-    const content = await fs.readFile(filePath, 'utf8');
-    const fileName = path.basename(filePath).replace(/\.(js|conf)$/, '');
+    const files = fs.readdirSync(directoryPath);
     
-    // 提取应用名称
-    const appNameMatch = content.match(/const\s+appName\s*=\s*["']([^"']+)["']/);
-    const appName = appNameMatch 
-      ? appNameMatch[1].replace(/✨/g, '').trim() 
-      : fileName;
-    
-    // 提取作者
-    const authorMatch = content.match(/const\s+author\s*=\s*["']([^"']+)["']/);
-    const author = authorMatch ? authorMatch[1] : '🅜ⓘ🅚ⓔ🅟ⓗ🅘ⓔ';
-    
-    // 提取URL模式
-    const patterns: string[] = [];
-    
-    // 从各种格式中提取URL模式
-    const patternRegexes = [
-      /pattern=([^,"\s]+)/g,             // Surge格式
-      /http-response\s+([^\s,]+)/g,      // Loon格式
-      /url\s+script-[^-]+-[^-]+\s+([^\s]+)/g  // QuantumultX格式
-    ];
-    
-    patternRegexes.forEach(regex => {
-      let match;
-      while ((match = regex.exec(content)) !== null) {
-        if (match[1] && !patterns.includes(match[1])) {
-          patterns.push(match[1]);
-        }
+    files.forEach(file => {
+      const filePath = path.join(directoryPath, file);
+      const stat = fs.statSync(filePath);
+      
+      if (stat.isFile() && path.extname(file).toLowerCase() === '.js') {
+        processQxScript(filePath);
       }
     });
     
-    // 提取脚本路径
-    let scriptPath = '';
-    const scriptPathMatch = content.match(/script-path=([^,\s]+)/i) || 
-                           content.match(/script-response-body\s+([^\s]+)/i);
-    
-    if (scriptPathMatch) {
-      scriptPath = scriptPathMatch[1];
-    }
-    
-    // 提取MITM主机名
-    const hostnames: string[] = [];
-    const hostnameMatches = content.match(/hostname\s*=\s*[%APPEND%\s]*([^,\n]+)/g);
-    
-    if (hostnameMatches) {
-      hostnameMatches.forEach(match => {
-        const hostnameStr = match.replace(/hostname\s*=\s*(%APPEND%\s*)?/, '').trim();
-        const hosts = hostnameStr.split(',').map(h => h.trim());
-        hosts.forEach(host => {
-          if (host && !hostnames.includes(host)) {
-            hostnames.push(host);
-          }
-        });
-      });
-    }
-    
-    return {
-      fileName,
-      appName,
-      author,
-      scriptPath,
-      patterns,
-      hostnames
-    };
-  } catch (err) {
-    console.error(`Error extracting info from ${filePath}:`, err);
-    throw err;
+    console.log('All scripts processed successfully');
+  } catch (error) {
+    console.error('Error processing directory:', error);
   }
 }
 
-/**
- * 生成Loon插件
- */
-function generateLoonPlugin(scriptInfo: ScriptType): string {
-  const { appName, author, scriptPath, patterns, hostnames } = scriptInfo;
-  // 使用应用名小写且没有空格作为图标名和tag名
-  const iconName = appName ? appName.toLowerCase().replace(/\s+/g, '') : scriptInfo.fileName.toLowerCase();
-  const tagName = iconName;
-  
-  let loonConfig = `#!name = ${appName} 🔐APP\n`;
-  loonConfig += `#!desc = 插件\n`;
-  loonConfig += `#!author = ${author}\n`;
-  loonConfig += `#!icon = https://raw.githubusercontent.com/Mikephie/icons/main/icon/${iconName}.png\n`;
-  loonConfig += `#appCategory = select,"✅签到","🚫广告","🔐APP","🛠️工具"\n\n`;
-  
-  if (patterns && patterns.length > 0 && scriptPath) {
-    loonConfig += `[Script]\n`;
-    // 使用第一个模式
-    loonConfig += `http-response ${patterns[0]} script-path=${scriptPath}, requires-body=true, timeout=60, tag=${tagName}\n\n`;
-  }
-  
-  if (hostnames && hostnames.length > 0) {
-    loonConfig += `[MITM]\n`;
-    loonConfig += `hostname = ${hostnames.join(', ')}\n`;
-  }
-  
-  return loonConfig;
+// 如果直接运行脚本，则处理指定目录
+if (require.main === module) {
+  const qxDirectoryPath = process.argv[2] || './qx';
+  processQxDirectory(qxDirectoryPath);
 }
 
-/**
- * 生成Surge模块
- */
-function generateSurgeModule(scriptInfo: ScriptType): string {
-  const { appName, author, scriptPath, patterns, hostnames } = scriptInfo;
-  // 使用应用名小写且没有空格作为图标名
-  const iconName = appName ? appName.toLowerCase().replace(/\s+/g, '') : scriptInfo.fileName.toLowerCase();
-  
-  let surgeConfig = `#!name = ${appName} 🔐APP\n`;
-  surgeConfig += `#!desc = 网页游览 - 模块\n`;
-  surgeConfig += `#!author = ${author}\n`;
-  surgeConfig += `#!category=🔐APP\n`;
-  surgeConfig += `#!icon = https://raw.githubusercontent.com/Mikephie/icons/main/icon/${iconName}.png\n\n`;
-  
-  if (patterns && patterns.length > 0 && scriptPath) {
-    surgeConfig += `[Script]\n`;
-    // 使用第一个模式
-    surgeConfig += `${appName} = type=http-response, pattern=${patterns[0]}, script-path=${scriptPath}, requires-body=true, max-size=-1, timeout=60\n\n`;
-  }
-  
-  if (hostnames && hostnames.length > 0) {
-    surgeConfig += `[MITM]\n`;
-    surgeConfig += `hostname = %APPEND% ${hostnames.join(', ')}\n`;
-  }
-  
-  return surgeConfig;
-}
-
-/**
- * 保存配置到文件，只有当文件不存在或内容变化时才写入
- */
-async function saveConfig(
-  outputDir: string, 
-  fileName: string, 
-  content: string,
-  extension: string
-): Promise<boolean> {
-  try {
-    const outputPath = path.join(outputDir, `${fileName}${extension}`);
-    
-    // 检查文件是否已存在
-    let fileChanged = true;
-    try {
-      const existingContent = await fs.readFile(outputPath, 'utf8');
-      // 如果内容完全相同，不需要重写
-      if (existingContent === content) {
-        console.log(`File ${outputPath} already exists with identical content, skipping`);
-        fileChanged = false;
-      }
-    } catch (err) {
-      // 文件不存在，需要创建
-      console.log(`File ${outputPath} does not exist, creating new file`);
-    }
-    
-    // 只有当文件不存在或内容变化时才写入
-    if (fileChanged) {
-      await fs.writeFile(outputPath, content, 'utf8');
-      console.log(`Successfully saved to ${outputPath}`);
-    }
-    
-    return fileChanged;
-  } catch (err) {
-    console.error(`Error saving file ${fileName}:`, err);
-    return false;
-  }
-}
-
-/**
- * 主函数
- */
-async function main() {
-  try {
-    const scriptFiles = await getQuantumultXScripts();
-    console.log(`Found ${scriptFiles.length} QuantumultX scripts`);
-    
-    let hasChanges = false;
-    
-    for (const filePath of scriptFiles) {
-      const scriptInfo = await extractScriptInfo(filePath);
-      console.log(`Processing ${scriptInfo.fileName}...`);
-      
-      // 生成Loon插件
-      const loonConfig = generateLoonPlugin(scriptInfo);
-      const loonChanged = await saveConfig(
-        LOON_OUTPUT_DIR, 
-        scriptInfo.fileName, 
-        loonConfig, 
-        '.plugin'
-      );
-      
-      // 生成Surge模块
-      const surgeConfig = generateSurgeModule(scriptInfo);
-      const surgeChanged = await saveConfig(
-        SURGE_OUTPUT_DIR, 
-        scriptInfo.fileName, 
-        surgeConfig, 
-        '.sgmodule'
-      );
-      
-      // 如果任一文件有变化，记录有更改
-      if (loonChanged || surgeChanged) {
-        hasChanges = true;
-      }
-    }
-    
-    if (hasChanges) {
-      console.log('Processing completed with changes!');
-      // 设置GitHub Actions输出变量
-      if (process.env.GITHUB_OUTPUT) {
-        const fs = require('fs');
-        fs.appendFileSync(process.env.GITHUB_OUTPUT, 'has_file_changes=true\n');
-      }
-    } else {
-      console.log('Processing completed, no changes detected.');
-      if (process.env.GITHUB_OUTPUT) {
-        const fs = require('fs');
-        fs.appendFileSync(process.env.GITHUB_OUTPUT, 'has_file_changes=false\n');
-      }
-    }
-  } catch (err) {
-    console.error('Error in main process:', err);
-    process.exit(1);
-  }
-}
-
-// 执行主函数
-main();
+// 导出函数以便测试或模块化使用
+module.exports = {
+  parseQxScript,
+  generateLoonPlugin,
+  generateSurgeModule,
+  processQxScript,
+  processQxDirectory
+};
