@@ -1,0 +1,63 @@
+name: Convert to Branch
+
+on:
+  push:
+    paths:
+      - 'QuantumultX/**'
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+      
+      - name: Install dependencies
+        run: |
+          npm install -g typescript ts-node
+          npm install --save @types/node fs-extra axios
+          npm install --save-dev @types/fs-extra
+      
+      - name: Create temporary branch
+        run: |
+          # 创建并切换到一个新的临时分支
+          git checkout -b converted-files-temp
+      
+      - name: Clean directories
+        run: |
+          # 删除现有的转换目录
+          rm -rf Loon
+          rm -rf Surge
+          
+          # 重新创建干净的目录
+          mkdir -p Loon/plugins
+          mkdir -p Surge/modules
+      
+      - name: Run conversion script
+        run: ts-node scripts/convert.ts
+      
+      - name: Commit changes
+        run: |
+          git config --global user.email "action@github.com"
+          git config --global user.name "GitHub Action"
+          git add Loon/ Surge/
+          git commit -m "Auto convert scripts: $(date +'%Y-%m-%d %H:%M:%S')" || echo "No changes to commit"
+      
+      - name: Push to converted branch
+        run: |
+          # 删除远程分支(如果存在)
+          git push origin --delete converted-files || echo "Branch doesn't exist yet"
+          
+          # 推送到新的分支
+          git branch -M converted-files
+          git push -f origin converted-files
