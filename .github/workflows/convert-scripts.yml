@@ -1,0 +1,69 @@
+name: Convert Scripts
+
+on:
+  push:
+    paths:
+      - 'QuantumultX/**/*.js'
+      - 'QuantumultX/**/*.conf'
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+          # 完全移除cache选项
+
+      - name: Install dependencies
+        run: |
+          npm install -g typescript ts-node
+          npm install --no-package-lock --save @types/node fs-extra axios
+          npm install --no-package-lock --save-dev @types/fs-extra
+
+      - name: Create output directories
+        run: |
+          mkdir -p Loon/plugins
+          mkdir -p Surge/modules
+
+      - name: Run conversion script
+        id: convert
+        run: |
+          ts-node scripts/convert.ts
+
+      - name: Configure Git
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+      - name: Commit and push changes
+        run: |
+          git add Loon/ Surge/
+          
+          # 检查是否有变更
+          if git diff --staged --quiet; then
+            echo "No changes detected"
+            exit 0
+          fi
+          
+          # 有变更时提交
+          git commit -m "Auto convert scripts: $(date +'%Y-%m-%d %H:%M:%S')"
+          
+          # 推送变更
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
