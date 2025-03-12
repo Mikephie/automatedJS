@@ -8,11 +8,12 @@ const SURGE_OUTPUT_DIR = 'Surge/modules';
 
 // 定义脚本类型
 type ScriptType = {
-  fileName: string;     // 原始文件名
-  appName?: string;     // 应用名称
-  author?: string;      // 作者
-  loonConfig?: string;  // Loon配置部分
-  surgeConfig?: string; // Surge配置部分
+  fileName: string;      // 原始文件名
+  appName?: string;      // 应用名称
+  author?: string;       // 作者
+  scriptPath?: string;   // 脚本路径
+  patterns?: string[];   // URL模式
+  hostnames?: string[];  // 主机名
 };
 
 /**
@@ -31,192 +32,171 @@ async function getQuantumultXScripts(): Promise<string[]> {
 }
 
 /**
- * 从脚本文件中直接提取Loon和Surge配置
+ * 从脚本文件中提取关键信息
  */
-async function extractConfigs(filePath: string): Promise<ScriptType> {
+async function extractScriptInfo(filePath: string): Promise<ScriptType> {
   try {
     const content = await fs.readFile(filePath, 'utf8');
     const fileName = path.basename(filePath).replace(/\.(js|conf)$/, '');
     
-    // 提取应用名称
-    const appNameMatch = content.match(/const\s+appName\s*=\s*["']([^"']+)["']/);
-    const appName = appNameMatch 
-      ? appNameMatch[1].replace(/✨/g, '').trim() 
-      : fileName;
+    // 提取应用名称 - 增强提取规则
+    let appName = fileName; // 默认使用文件名
     
-    // 提取作者
-    const authorMatch = content.match(/const\s+author\s*=\s*["']([^"']+)["']/);
-    const author = authorMatch ? authorMatch[1] : '🅜ⓘ🅚ⓔ🅟ⓗ🅘ⓔ';
+    // 尝试多种格式提取应用名
+    const appNameMatches = [
+      // 从注释中提取 "📜 ✨ 应用名 ✨" 格式
+      content.match(/📜\s*✨\s*([^✨]+)\s*✨/),
+      // 从变量定义中提取
+      content.match(/const\s+appName\s*=\s*["']([^"']+)["']/),
+      // 从标题注释中提取
+      content.match(/\/\*\s*([^*]+?)\s*\*\//),
+      // 从Surge模块定义中提取
+      content.match(/\[Script\].*?Surge.*?\n(.*?)\s*=/s)
+    ];
     
-    // 提取或构建Loon配置
-    let loonConfig = '';
+    for (const match of appNameMatches) {
+      if (match && match[1]) {
+        appName = match[1].replace(/✨/g, '').trim();
+        break;
+      }
+    }
     
-    // 尝试提取预配置的Loon部分
-    const loonMatch = content.match(/Loon\n([\s\S]*?)(?=\n\n\n|Surge\n|$)/);
-    if (loonMatch && loonMatch[1].trim()) {
-      loonConfig = loonMatch[1].trim();
-    } else {
-      // 如果没有预配置，尝试从脚本中提取元素构建一个基本配置
-      const patternMatch = content.match(/http-response\s+([^\s]+)/);
-      const scriptPathMatch = content.match(/script-path=([^,\s]+)/);
-      const hostnameMatch = content.match(/hostname\s*=\s*([^,\n]+)/);
-      
-      if (patternMatch && scriptPathMatch) {
-        const pattern = patternMatch[1].trim();
-        const scriptPath = scriptPathMatch[1].trim();
-        const hostname = hostnameMatch ? hostnameMatch[1].trim() : '';
-        
-        loonConfig = `#!name = ${appName} 🔐APP\n`;
-        loonConfig += `#!desc = 插件\n`;
-        loonConfig += `#!author = ${author}\n`;
-        loonConfig += `#!icon = https://raw.githubusercontent.com/Mikephie/icons/main/icon/${appName.toLowerCase().replace(/\s+/g, '')}.png\n`;
-        loonConfig += `#appCategory = select,"✅签到","🚫广告","🔐APP","🛠️工具"\n\n`;
-        loonConfig += `[Script]\n`;
-        loonConfig += `http-response ${pattern} script-path=${scriptPath}, requires-body=true, timeout=60, tag=${fileName.toLowerCase()}\n\n`;
-        
-        if (hostname) {
-          loonConfig += `[MITM]\n`;
-          loonConfig += `hostname = ${hostname}\n`;
+    // 提取作者 - 默认作者
+    const author = '🅜ⓘ🅚ⓔ🅟ⓗ🅘ⓔ';
+    
+    // 提取URL模式
+    const patterns: string[] = [];
+    
+    // 从各种格式中提取URL模式 - 增强提取规则
+    const patternRegexes = [
+      // QX格式
+      /\[rewrite_local\].*?\n(.*?)\s+url\s+script-response-body/s,
+      // Surge格式
+      /pattern=([^,"\s]+)/g,
+      // Loon格式
+      /http-response\s+([^\s,]+)/g,
+      // 其他可能的QX格式
+      /url\s+script-[^-]+-[^-]+\s+([^\s]+)/g
+    ];
+    
+    // 尝试QX格式提取
+    const qxMatch = patternRegexes[0].exec(content);
+    if (qxMatch && qxMatch[1] && !patterns.includes(qxMatch[1].trim())) {
+      patterns.push(qxMatch[1].trim());
+    }
+    
+    // 尝试其他格式提取
+    for (let i = 1; i < patternRegexes.length; i++) {
+      let match;
+      const regex = patternRegexes[i];
+      while ((match = regex.exec(content)) !== null) {
+        if (match[1] && !patterns.includes(match[1])) {
+          patterns.push(match[1]);
         }
       }
     }
     
-    // 提取或构建Surge配置
-    let surgeConfig = '';
+    // 提取脚本路径 - 增强提取规则
+    let scriptPath = '';
+    const scriptPathMatches = [
+      content.match(/script-path=([^,\s]+)/i),
+      content.match(/script-response-body\s+([^\s]+)/i)
+    ];
     
-    // 尝试提取预配置的Surge部分
-    const surgeMatch = content.match(/Surge\n([\s\S]*?)(?=\n\n\n|Loon\n|$)/);
-    if (surgeMatch && surgeMatch[1].trim()) {
-      surgeConfig = surgeMatch[1].trim();
-    } else {
-      // 如果没有预配置，尝试从脚本中提取元素构建一个基本配置
-      const patternMatch = content.match(/pattern=([^,\s]+)/);
-      const scriptPathMatch = content.match(/script-path=([^,\s]+)/);
-      const hostnameMatch = content.match(/hostname\s*=\s*([^,\n]+)/);
-      
-      if (patternMatch && scriptPathMatch) {
-        const pattern = patternMatch[1].trim();
-        const scriptPath = scriptPathMatch[1].trim();
-        const hostname = hostnameMatch ? hostnameMatch[1].trim() : '';
-        
-        surgeConfig = `#!name = ${appName} 🔐APP\n`;
-        surgeConfig += `#!desc = 网页游览 - 模块\n`;
-        surgeConfig += `#!author = ${author}\n`;
-        surgeConfig += `#!category=🔐APP\n`;
-        surgeConfig += `#!icon = https://raw.githubusercontent.com/Mikephie/icons/main/icon/${appName.toLowerCase().replace(/\s+/g, '')}.png\n\n`;
-        surgeConfig += `[Script]\n`;
-        surgeConfig += `${appName} = type=http-response, pattern=${pattern}, script-path=${scriptPath}, requires-body=true, max-size=-1, timeout=60\n\n`;
-        
-        if (hostname) {
-          surgeConfig += `[MITM]\n`;
-          surgeConfig += `hostname = %APPEND% ${hostname}\n`;
-        }
+    for (const match of scriptPathMatches) {
+      if (match && match[1]) {
+        scriptPath = match[1];
+        break;
       }
     }
+    
+    // 提取MITM主机名 - 增强提取规则
+    const hostnames: string[] = [];
+    const hostnameSections = content.match(/\[MITM\][\s\S]*?hostname\s*=\s*([^;\n]+)/g);
+    
+    if (hostnameSections) {
+      hostnameSections.forEach(section => {
+        const hostnameStr = section.replace(/\[MITM\][\s\S]*?hostname\s*=\s*(%APPEND%\s*)?/, '').trim();
+        const hosts = hostnameStr.split(/[,\s]+/).filter(Boolean);
+        hosts.forEach(host => {
+          if (host && !hostnames.includes(host)) {
+            hostnames.push(host);
+          }
+        });
+      });
+    }
+    
+    console.log(`提取信息: ${appName}, 模式: ${patterns.join(',')}, 主机名: ${hostnames.join(',')}`);
     
     return {
       fileName,
       appName,
       author,
-      loonConfig,
-      surgeConfig
+      scriptPath,
+      patterns,
+      hostnames
     };
   } catch (err) {
-    console.error(`Error extracting configs from ${filePath}:`, err);
+    console.error(`Error extracting info from ${filePath}:`, err);
     throw err;
   }
 }
 
 /**
- * 处理配置内容，替换应用名称和图标URL
+ * 生成Loon插件
  */
-function processConfig(
-  config: string, 
-  appName: string, 
-  fileName: string, 
-  author: string,
-  type: 'loon' | 'surge'
-): string {
-  // 替换图标URL中的应用名
-  const iconPattern = /#!icon\s*=\s*https:\/\/raw\.githubusercontent\.com\/Mikephie\/icons\/main\/icon\/[^.\n]+\.png/;
-  const iconReplacement = `#!icon = https://raw.githubusercontent.com/Mikephie/icons/main/icon/${appName.toLowerCase().replace(/\s+/g, '')}.png`;
+function generateLoonPlugin(scriptInfo: ScriptType): string {
+  const { appName, author, scriptPath, patterns, hostnames } = scriptInfo;
+  // 使用应用名小写且没有空格作为图标名和tag名
+  const iconName = appName ? appName.toLowerCase().replace(/\s+/g, '') : scriptInfo.fileName.toLowerCase();
+  const tagName = iconName;
   
-  if (iconPattern.test(config)) {
-    config = config.replace(iconPattern, iconReplacement);
+  let loonConfig = `#!name = ${appName} 🔐APP\n`;
+  loonConfig += `#!desc = 插件\n`;
+  loonConfig += `#!author = ${author}\n`;
+  loonConfig += `#!icon = https://raw.githubusercontent.com/Mikephie/icons/main/icon/${iconName}.png\n`;
+  loonConfig += `#appCategory = select,"✅签到","🚫广告","🔐APP","🛠️工具"\n\n`;
+  
+  if (patterns && patterns.length > 0 && scriptPath) {
+    loonConfig += `[Script]\n`;
+    // 使用第一个模式
+    loonConfig += `http-response ${patterns[0]} script-path=${scriptPath}, requires-body=true, timeout=60, tag=${tagName}\n\n`;
   }
   
-  // 替换或添加名称
-  const namePattern = type === 'loon' 
-    ? /#!name\s*=\s*[^\n]+/ 
-    : /#!name\s*=\s*[^\n]+/;
-  
-  const nameReplacement = type === 'loon'
-    ? `#!name = ${appName} 🔐APP`
-    : `#!name = ${appName} 🔐APP`;
-  
-  if (namePattern.test(config)) {
-    config = config.replace(namePattern, nameReplacement);
-  } else {
-    // 如果没有找到名称行，添加它
-    config = `${nameReplacement}\n${config}`;
+  if (hostnames && hostnames.length > 0) {
+    loonConfig += `[MITM]\n`;
+    loonConfig += `hostname = ${hostnames.join(', ')}\n`;
   }
   
-  // 替换或添加作者
-  const authorPattern = /#!author\s*=\s*[^\n]+/;
-  const authorReplacement = `#!author = ${author}`;
+  return loonConfig;
+}
+
+/**
+ * 生成Surge模块
+ */
+function generateSurgeModule(scriptInfo: ScriptType): string {
+  const { appName, author, scriptPath, patterns, hostnames } = scriptInfo;
+  // 使用应用名小写且没有空格作为图标名
+  const iconName = appName ? appName.toLowerCase().replace(/\s+/g, '') : scriptInfo.fileName.toLowerCase();
   
-  if (authorPattern.test(config)) {
-    config = config.replace(authorPattern, authorReplacement);
-  } else {
-    // 在名称行后添加作者行
-    config = config.replace(nameReplacement, `${nameReplacement}\n${authorReplacement}`);
+  let surgeConfig = `#!name = ${appName} 🔐APP\n`;
+  surgeConfig += `#!desc = 网页游览 - 模块\n`;
+  surgeConfig += `#!author = ${author}\n`;
+  surgeConfig += `#!category=🔐APP\n`;
+  surgeConfig += `#!icon = https://raw.githubusercontent.com/Mikephie/icons/main/icon/${iconName}.png\n\n`;
+  
+  if (patterns && patterns.length > 0 && scriptPath) {
+    surgeConfig += `[Script]\n`;
+    // 使用第一个模式
+    surgeConfig += `${appName} = type=http-response, pattern=${patterns[0]}, script-path=${scriptPath}, requires-body=true, max-size=-1, timeout=60\n\n`;
   }
   
-  // Surge特有的处理
-  if (type === 'surge') {
-    // 添加或替换category
-    const categoryPattern = /#!category\s*=\s*[^\n]+/;
-    const categoryReplacement = `#!category=🔐APP`;
-    
-    if (categoryPattern.test(config)) {
-      config = config.replace(categoryPattern, categoryReplacement);
-    } else {
-      // 在作者行后添加分类行
-      config = config.replace(authorReplacement, `${authorReplacement}\n${categoryReplacement}`);
-    }
-    
-    // 修复 [Script] // 格式问题
-    config = config.replace(/\[Script\]\s*\/\//, '[Script]');
+  if (hostnames && hostnames.length > 0) {
+    surgeConfig += `[MITM]\n`;
+    surgeConfig += `hostname = %APPEND% ${hostnames.join(', ')}\n`;
   }
   
-  // Loon特有的处理
-  if (type === 'loon') {
-    // 添加或替换appCategory
-    const appCategoryPattern = /#appCategory\s*=\s*[^\n]+/;
-    const appCategoryReplacement = `#appCategory = select,"✅签到","🚫广告","🔐APP","🛠️工具"`;
-    
-    if (appCategoryPattern.test(config)) {
-      config = config.replace(appCategoryPattern, appCategoryReplacement);
-    } else {
-      // 添加appCategory行
-      if (config.includes('#!icon')) {
-        // 如果有图标行，在图标行后添加
-        config = config.replace(iconReplacement, `${iconReplacement}\n${appCategoryReplacement}`);
-      } else {
-        // 否则在作者行后添加
-        config = config.replace(authorReplacement, `${authorReplacement}\n${appCategoryReplacement}`);
-      }
-    }
-    
-    // 移除脚本主体内容 - 只保留配置部分
-    // 找到 [MITM] 部分后的内容全部移除
-    const mitmMatch = config.match(/(\[MITM\][^\n]*(?:\n[^\n]+)*)/);
-    if (mitmMatch) {
-      config = config.substring(0, config.indexOf(mitmMatch[0]) + mitmMatch[0].length);
-    }
-  }
-  
-  return config;
+  return surgeConfig;
 }
 
 /**
@@ -229,6 +209,9 @@ async function saveConfig(
   extension: string
 ): Promise<boolean> {
   try {
+    // 确保输出目录存在
+    await fs.ensureDir(outputDir);
+    
     const outputPath = path.join(outputDir, `${fileName}${extension}`);
     
     // 检查文件是否已存在
@@ -263,66 +246,69 @@ async function saveConfig(
  */
 async function main() {
   try {
+    // 确保输出目录存在
+    await fs.ensureDir(LOON_OUTPUT_DIR);
+    await fs.ensureDir(SURGE_OUTPUT_DIR);
+    
     const scriptFiles = await getQuantumultXScripts();
-    console.log(`Found ${scriptFiles.length} QuantumultX scripts to extract`);
+    console.log(`找到 ${scriptFiles.length} 个 QuantumultX 脚本`);
     
     let hasChanges = false;
     
     for (const filePath of scriptFiles) {
-      const scriptInfo = await extractConfigs(filePath);
-      console.log(`Processing ${scriptInfo.fileName}...`);
-      
-      // 处理Loon插件
-      if (scriptInfo.loonConfig) {
-        console.log(`Found Loon config for ${scriptInfo.fileName}`);
+      try {
+        console.log(`处理脚本文件: ${filePath}`);
+        const scriptInfo = await extractScriptInfo(filePath);
+        
+        // 如果没有模式或脚本路径，跳过此文件
+        if (!scriptInfo.patterns || scriptInfo.patterns.length === 0 || !scriptInfo.scriptPath) {
+          console.warn(`警告: ${filePath} 缺少必要的URL模式或脚本路径，跳过此文件`);
+          continue;
+        }
+        
+        // 生成Loon插件
+        const loonConfig = generateLoonPlugin(scriptInfo);
         const loonChanged = await saveConfig(
           LOON_OUTPUT_DIR, 
           scriptInfo.fileName, 
-          scriptInfo.loonConfig, 
+          loonConfig, 
           '.plugin'
         );
         
-        if (loonChanged) {
-          hasChanges = true;
-        }
-      } else {
-        console.log(`No Loon config found for ${scriptInfo.fileName}`);
-      }
-      
-      // 处理Surge模块
-      if (scriptInfo.surgeConfig) {
-        console.log(`Found Surge config for ${scriptInfo.fileName}`);
+        // 生成Surge模块
+        const surgeConfig = generateSurgeModule(scriptInfo);
         const surgeChanged = await saveConfig(
           SURGE_OUTPUT_DIR, 
           scriptInfo.fileName, 
-          scriptInfo.surgeConfig, 
+          surgeConfig, 
           '.sgmodule'
         );
         
-        if (surgeChanged) {
+        // 如果任一文件有变化，记录有更改
+        if (loonChanged || surgeChanged) {
           hasChanges = true;
         }
-      } else {
-        console.log(`No Surge config found for ${scriptInfo.fileName}`);
+      } catch (err) {
+        console.error(`处理 ${filePath} 时出错:`, err);
+        // 继续处理下一个文件，不中断整个流程
+        continue;
       }
     }
     
     if (hasChanges) {
-      console.log('Extraction completed with changes!');
+      console.log('处理完成，有文件变更!');
       // 设置GitHub Actions输出变量
       if (process.env.GITHUB_OUTPUT) {
-        const fs = require('fs');
-        fs.appendFileSync(process.env.GITHUB_OUTPUT, 'has_file_changes=true\n');
+        await fs.appendFile(process.env.GITHUB_OUTPUT, 'has_file_changes=true\n');
       }
     } else {
-      console.log('Extraction completed, no changes detected.');
+      console.log('处理完成，没有检测到文件变更。');
       if (process.env.GITHUB_OUTPUT) {
-        const fs = require('fs');
-        fs.appendFileSync(process.env.GITHUB_OUTPUT, 'has_file_changes=false\n');
+        await fs.appendFile(process.env.GITHUB_OUTPUT, 'has_file_changes=false\n');
       }
     }
   } catch (err) {
-    console.error('Error in main process:', err);
+    console.error('主流程出错:', err);
     process.exit(1);
   }
 }
